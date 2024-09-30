@@ -206,17 +206,41 @@ export default async (req: Request): Promise<Response> => {
       const articleLabelsPrompt = labelsToPrompt(
         article.labels,
         annotateLabel,
-        "Existing article tags: "
+        "Existing article tags: ",
+        true
       );
 
+      const chatgptExample = `tags = [
+        {
+          "name": "Tag Name",
+          "description": "Really short tag description or an empty string"
+        },
+        {
+          "name": "Gender and Education",
+          "description": ""
+        },
+        {
+          "name": "Inclusive Knowledge Preservation",
+          "description": "Accessibility and long-term preservation of human knowledge"
+        }
+      ]`;
+
       const allLabels = await getAllLabelsFromOmnivore(omnivoreHeaders);
+      console.log("allLabels: ", allLabels);
+      console.log("article.labels: ", article.labels);
+
       const allLabelsPrompt = labelsToPrompt(
         allLabels,
         annotateLabel,
-        "All labels in Omnivore: "
+        "All labels in Omnivore: ",
+        true
       );
-
-      const doTagsPrompt = `Generate a list of useful tags that could be added to this article. Only provide the list of tags, one per line. `;
+      const doTagsPrompt = `Generate a list of useful tags that could be added to this article. Proved them as a JSON array of objects with name and description properties.
+      ONLY respond with the JSON array.
+      Example: ${JSON.stringify(chatgptExample)}
+      Please keep with the existing taxonomy and use the same language as the existing tags. Don’t have multiple tags referring to the same topic. Please reuse existing tags if they are similar.
+      Although as I'm an artist, I'm always looking for meaningful connections and metaphors. So if a tag falls outside of the existing structure but makes sense in the context of the article, add it as a new tag.
+      ONLY respond with the JSON array!`;
       const prompt = arrayToPromptGenerator([
         doTagsPrompt,
         ...currentLabelActions.prompts,
@@ -224,9 +248,36 @@ export default async (req: Request): Promise<Response> => {
         allLabelsPrompt,
       ]);
 
+      console.log("prompt: ", prompt);
+
       const completionResponse = await openai.chat.completions.create({
         ...JSON.parse(settings),
         messages: [{ role: "user", content: prompt }],
+        response_format: { 
+          type: "json_schema",
+          schema: {
+            type: "object",
+            properties: {
+              tags: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: {
+                    name: {
+                      type: "string"
+                    },
+                    description: {
+                      type: "string"
+                    }
+                  },
+                  required: ["name", "description"],
+                  additionalProperties: false
+                }
+              }
+            },
+            required: ["tags"]
+          }
+        }
       });
 
       const generatedTags = completionResponse.choices[0].message.content
@@ -417,7 +468,8 @@ function getLabelDescription(labelName: string, labels: Label[]): string | undef
 function labelsToPrompt(
   labels: Label[],
   annotateLabel: string,
-  prePrompt: string
+  prePrompt: string,
+  returnJson: boolean = false
 ): string | null {
   if (labels.length === 0) {
     return null;
@@ -425,11 +477,19 @@ function labelsToPrompt(
   const labelsWithoutAnnotationLabel = labels.filter(
     (label) => label.name.split(":")[0] !== annotateLabel
   );
-  const labelString = labelsWithoutAnnotationLabel
-    .map((label) => label.name)
-    .join(", ");
-  const existingArticleTagsPrompt = `${prePrompt} ${labelString}`;
-  return existingArticleTagsPrompt;
+  if (returnJson) {
+    const json = labelsWithoutAnnotationLabel.map((label) => ({
+      name: label.name,
+      description: label.description || ""
+    }));
+    return JSON.stringify(json);
+  } else {  
+    const labelString = labelsWithoutAnnotationLabel
+      .map((label) => label.name)
+      .join(", ");
+    const existingArticleTagsPrompt = `${prePrompt} ${labelString}`;
+    return existingArticleTagsPrompt;
+  }
 }
 
 async function getAllLabelsFromOmnivore(
