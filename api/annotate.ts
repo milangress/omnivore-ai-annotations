@@ -159,13 +159,12 @@ export default async (req: Request): Promise<Response> => {
 
     const article = await getArticle(articleId, omnivoreHeaders);
 
-
     const labelActions = getLabelAction(matchingLabels, article, annotateLabel);
 
     const model = process.env["OPENAI_MODEL"] || "gpt-4-turbo-preview";
     const settings = process.env["OPENAI_SETTINGS"] || `{"model":"${model}"}`;
 
-
+    console.log("labelAction: ", labelActions);
     const { found, action } = resolvedLabelActions("tags", labelActions);
     console.log("Found 'tags' action:", found);
     console.log("Matching LabelAction:", action);
