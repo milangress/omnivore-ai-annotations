@@ -184,7 +184,7 @@ export default async (req: Request): Promise<Response> => {
           done: false,
         }
       });
-    }
+    } 
 
     const labelActions = getLabelAction(matchingLabels, article);
 
@@ -192,26 +192,12 @@ export default async (req: Request): Promise<Response> => {
     const settings = process.env["OPENAI_SETTINGS"] || `{"model":"${model}"}`;
 
     const openai = new OpenAI();
-
-    const resolvedLabelActions = (currentAction: string) => {
-      const labelAction = labelActions.find(label => {
-        label.action === currentAction && label.done === false
-      })
-      return labelAction
-    }
-    const hasOpenLabelActions = () => {
-      const undoneAction = labelActions.find(label => label.done === false);
-      return {
-        hasOpen: labelActions.some(label => label.done === false),
-        nextAction: undoneAction || null
-      };
-    }
   
 
 
-    const currentLabelActions = resolvedLabelActions("tags");
+    const currentLabelActions = resolvedLabelActions("tags", labelActions);
     // Handle different 'do:' actions 
-    if (currentLabelActions) {
+    if (currentLabelActions && currentLabelActions.action === "tags") {
       
       console.log("TAGS currentLabelActions: ", currentLabelActions);
 
@@ -313,8 +299,9 @@ export default async (req: Request): Promise<Response> => {
         { status: 200 }
       );
     } 
-    else if (hasOpenLabelActions().hasOpen) {
-      const currentLabelAction = hasOpenLabelActions().nextAction;
+    else if (hasOpenLabelActions(labelActions).hasOpen) {
+      const currentLabelAction = hasOpenLabelActions(labelActions).nextAction;
+      console.log("Running catchall with: ", currentLabelAction?.action);
       console.log("currentLabelAction: ", currentLabelAction);
       if (!currentLabelAction) {
         return new Response(`No current label action found.`, { status: 400 });
@@ -362,6 +349,19 @@ export default async (req: Request): Promise<Response> => {
     );
   }
 };
+
+const resolvedLabelActions = (currentAction: string, myLabelAction: LabelAction[] ) => {
+  return myLabelAction.find(label => {
+    label.action === currentAction && label.done === false
+  })
+}
+const hasOpenLabelActions = (myLabelAction: LabelAction[])   => {
+  const undoneAction = myLabelAction.find(label => label.done === false);
+  return {
+    hasOpen: myLabelAction.some(label => label.done === false),
+    nextAction: undoneAction || null
+  };
+}
 
 async function getArticle(articleId: string, omnivoreHeaders: Record<string, string>): Promise<Article> {
 
