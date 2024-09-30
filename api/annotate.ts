@@ -12,10 +12,30 @@ interface Label {
   description: string;
 }
 
+interface LabelAction {
+  label: string;
+  replacedLabel: string;
+  processLabel: string;
+  action: string;
+  prompts: string[];
+  description: string | undefined;
+  done: boolean;
+}
+
+
 interface LabelPayload {
   pageId: string;
   labels: Label[];
 }
+
+interface Article {
+  id: string;
+  content: string;
+  title: string;
+  labels: Label[];
+  highlights: Array<{ id: string; type: string }>;
+  existingNote: { id: string; type: string } | undefined;
+};
 
 interface PagePayload {
   id: string;
@@ -60,9 +80,24 @@ interface PagePayload {
   previewContent: string;
 }
 
+// New types for the webhook payload
+interface WebhookLabel {
+  id: string;
+  name: string;
+  color: string;
+}
+
+interface WebhookLabelPayload {
+  labels: WebhookLabel[];
+  pageId: string;
+}
+
+
+// Update the existing WebhookPayload interface
 interface WebhookPayload {
   action: string;
-  label?: LabelPayload;
+  userId: string;
+  label?: WebhookLabelPayload;
   page?: PagePayload;
 }
 
@@ -73,130 +108,103 @@ export default async (req: Request): Promise<Response> => {
     const body: WebhookPayload = (await req.json()) as WebhookPayload;
     console.log("Received webhook payload:", body);
 
-    // Check if it's a 'do:' action
-    if (!body.action.startsWith("do")) {
-      return new Response("Not a 'do:' action, ignoring.", { status: 200 });
+    // Update the labels handling
+    const labels = (body.label?.labels || [])
+      .filter((label): label is WebhookLabel => !!label && typeof label === 'object' && 'name' in label)
+    
+    if (labels.length === 0) {
+      return new Response(`No labels found in the webhook payload.`, { status: 400 });
+    }
+    
+    const matchingLabels = labels
+      .filter(label => 
+        label.name === annotateLabel || 
+        label.name.startsWith(`${annotateLabel}:`)
+      )
+      .map(label => label.name);
+
+    if (matchingLabels.length === 0) {
+      return new Response(`No '${annotateLabel}' labels found. Expected at least one '${annotateLabel}' or '${annotateLabel}:*' label.`, { status: 400 });
     }
 
-    const articleId = body.label?.pageId || body.page?.id;
+    console.log(`Found matching labels: ${matchingLabels.join(', ')}`);
+
+    // You can now use matchingLabels array for further processing
+    // For example, to check for specific labels:
+    const hasBaseLabel = matchingLabels.includes(annotateLabel);
+    const hasTask = matchingLabels.includes(`${annotateLabel}:task`);
+    const hasTranscription = matchingLabels.includes(`${annotateLabel}:transcription`);
+    const hasCompletion = matchingLabels.includes(`${annotateLabel}:completion`);
+
+    console.log(`hasBaseLabel: ${hasBaseLabel}, hasTask: ${hasTask}, hasTranscription: ${hasTranscription}, hasCompletion: ${hasCompletion}`);
+
+    const articleId = body.label?.pageId;
     if (!articleId) {
       throw new Error("No article ID found in the webhook payload.");
     }
 
-    // Transform 'do:' to 'did:'
-    const didAction = body.action.replace("do:", "did:");
-
-    // STEP 1: fetch the full article content and existing labels from Omnivore
     const omnivoreHeaders = {
       "Content-Type": "application/json",
       Authorization: process.env["OMNIVORE_API_KEY"] ?? "",
     };
 
-    interface FetchQueryResponse {
-      data: {
-        article: {
-          article: {
-            content: string;
-            title: string;
-            labels: Array<{
-              name: string;
-              description: string;
-            }>;
-            highlights: Array<{
-              id: string;
-              type: string;
-            }>;
-          };
-        };
-      };
+    const article = await getArticle(articleId, omnivoreHeaders);
+
+
+
+    function getLabelAction(matchingLabels: string[], article: Article): LabelAction[] {
+      return matchingLabels.map(label => {
+        const description = getLabelDescription(label, article.labels);
+        const promptWithFallback = description || process.env["OPENAI_PROMPT"] || "Return a tweet-length TL;DR of the following article.";
+
+        const promptBodyArray = (promptWithFallback: string) :string[] => [
+          promptWithFallback,
+          `Article title: ${article.title}`,
+          `Article content: ${article.content}`,
+          article.existingNote ? `Existing note: ${article.existingNote}` : "",
+        ];
+
+        return {
+          label: label,
+          replacedLabel: label.replace(`${annotateLabel}:`, "did:"),
+          processLabel: label.split(":")[0],
+          action: label.split(":")[1],
+          description,
+          prompts: promptBodyArray(promptWithFallback),
+          done: false,
+        }
+      });
     }
 
-    let fetchQuery = {
-      query: `query Article {
-    article(
-      slug: "${articleId}"
-      username: "."
-      format: "markdown"
-      ) {
-        ... on ArticleSuccess {
-          article {
-            title
-            content
-            labels {
-              name
-              description
-              id
-              color
-            }
-            highlights(input: { includeFriends: false }) {
-              id
-              shortId
-              user {
-                  id
-                  name
-                  createdAt
-              }
-              type
-            }
-          }
-        }
-      }
-    }`,
-    };
-
-    const omnivoreRequest = await fetch(
-      "https://api-prod.omnivore.app/api/graphql",
-      {
-        method: "POST",
-        headers: omnivoreHeaders,
-        body: JSON.stringify(fetchQuery),
-        redirect: "follow",
-      }
-    );
-    const omnivoreResponse =
-      (await omnivoreRequest.json()) as FetchQueryResponse;
-
-    const {
-      data: {
-        article: {
-          article: {
-            content: articleContent,
-            title: articleTitle,
-            labels: articleLabels,
-            highlights,
-          },
-        },
-      },
-    } = omnivoreResponse;
-
-    const promptFromLabel = articleLabels.find(
-      ({ name }) => name.split(":")[0] === annotateLabel
-    )?.description;
-
-    const promptFromLabelWithFallback =
-      promptFromLabel ||
-      process.env["OPENAI_PROMPT"] ||
-      "Return a tweet-length TL;DR of the following article.";
-
-    const existingNote = highlights.find(({ type }) => type === "NOTE");
-
-    const promptBodyArray = [
-      promptFromLabelWithFallback,
-      `Article title: ${articleTitle}`,
-      `Article content: ${articleContent}`,
-      existingNote ? `Existing note: ${existingNote}` : "",
-    ];
+    const labelActions = getLabelAction(matchingLabels, article);
 
     const model = process.env["OPENAI_MODEL"] || "gpt-4-turbo-preview";
     const settings = process.env["OPENAI_SETTINGS"] || `{"model":"${model}"}`;
 
     const openai = new OpenAI();
-    // Handle different 'do:' actions
-    if (body.action === "do:tags") {
-      // STEP 2: generate new tags using OpenAI's API
 
+    const resolvedLabelActions = (currentAction: string) => {
+      const labelAction = labelActions.find(label => {
+        label.action === currentAction && label.done === false
+      })
+      return labelAction
+    }
+    const hasOpenLabelActions = () => {
+      const undoneAction = labelActions.find(label => label.done === false);
+      return {
+        hasOpen: labelActions.some(label => label.done === false),
+        nextAction: undoneAction || null
+      };
+    }
+  
+
+
+    const currentLabelActions = resolvedLabelActions("tags");
+    // Handle different 'do:' actions 
+    if (currentLabelActions) {
+      
       const articleLabelsPrompt = labelsToPrompt(
-        articleLabels,
+        article.labels,
         annotateLabel,
         "Existing article tags: "
       );
@@ -211,7 +219,7 @@ export default async (req: Request): Promise<Response> => {
       const doTagsPrompt = `Generate a list of useful tags that could be added to this article. Only provide the list of tags, one per line. `;
       const prompt = arrayToPromptGenerator([
         doTagsPrompt,
-        ...promptBodyArray,
+        ...currentLabelActions.prompts,
         articleLabelsPrompt,
         allLabelsPrompt,
       ]);
@@ -227,7 +235,7 @@ export default async (req: Request): Promise<Response> => {
         .map((tag) => tag.trim())
         .filter(
           (tag) =>
-            tag && !articleLabels.some((existing) => existing.name === tag)
+            tag && !article.labels.some((existing) => existing.name === tag)
         );
 
       if (!generatedTags || generatedTags.length === 0) {
@@ -240,15 +248,15 @@ export default async (req: Request): Promise<Response> => {
 
       console.log(`Generated tags: ${generatedTags.join(", ")}`);
 
-      const labels = [
-        ...articleLabels.map((label) => label.name),
+      const newLabels = [
+        ...article.labels.map((label) => label.name),
         ...generatedTags,
-        didAction,
+        currentLabelActions.replacedLabel,
       ];
 
       await addLabelsToOmnivoreArticle(
-        articleId,
-        generatedTags,
+        article.id,
+        newLabels,
         omnivoreHeaders
       );
 
@@ -256,8 +264,13 @@ export default async (req: Request): Promise<Response> => {
         `New tags added to the article and action updated to did: action.`,
         { status: 200 }
       );
-    } else if (body.action.startsWith("do:")) {
-      const prompt = arrayToPromptGenerator([...promptBodyArray]);
+    } 
+    else if (hasOpenLabelActions().hasOpen) {
+      const currentLabelAction = hasOpenLabelActions().nextAction;
+      if (!currentLabelAction) {
+        return new Response(`No current label action found.`, { status: 400 });
+      }
+      const prompt = arrayToPromptGenerator([...currentLabelAction.prompts]);
 
       const completionResponse = await openai.chat.completions.create({
         ...JSON.parse(settings),
@@ -280,10 +293,10 @@ export default async (req: Request): Promise<Response> => {
       }
 
       await applyAnnotationToOmnivoreArticle(
-        articleId,
+        article.id,
         generatedResponse,
         omnivoreHeaders,
-        existingNote
+        article.existingNote
       );
       return new Response(`Annotation applied to the article.`, {
         status: 200,
@@ -299,11 +312,106 @@ export default async (req: Request): Promise<Response> => {
   }
 };
 
+async function getArticle(articleId: string, omnivoreHeaders: Record<string, string>): Promise<Article> {
+
+  interface FetchQueryResponse {
+    data: {
+      article: {
+        article: {
+          content: string;
+          title: string;
+          labels: Array<{
+            name: string;
+            description: string;
+          }>;
+          highlights: Array<{
+            id: string;
+            type: string;
+          }>;
+        };
+      };
+    };
+  }
+
+  let fetchQuery = {
+    query: `query Article {
+  article(
+    slug: "${articleId}"
+    username: "."
+    format: "markdown"
+    ) {
+      ... on ArticleSuccess {
+        article {
+          title
+          content
+          labels {
+            name
+            description
+            id
+            color
+          }
+          highlights(input: { includeFriends: false }) {
+            id
+            shortId
+            user {
+                id
+                name
+                createdAt
+            }
+            type
+          }
+        }
+      }
+    }
+  }`,
+  };
+
+  const omnivoreRequest = await fetch(
+    "https://api-prod.omnivore.app/api/graphql",
+    {
+      method: "POST",
+      headers: omnivoreHeaders,
+      body: JSON.stringify(fetchQuery),
+      redirect: "follow",
+    }
+  );
+  const omnivoreResponse =
+    (await omnivoreRequest.json()) as FetchQueryResponse;
+
+  const {
+    data: {
+      article: {
+        article: {
+          content: articleContent,
+          title: articleTitle,
+          labels: articleLabels,
+          highlights,
+        },
+      },
+    },
+  } = omnivoreResponse;
+
+  let article = {
+    id: articleId,
+    content: articleContent,
+    title: articleTitle,
+    labels: articleLabels,
+    highlights,
+    existingNote: highlights.find(({ type }) => type === "NOTE")
+  }
+  return article;
+}
+
 function arrayToPromptGenerator(array: (string | null)[]): string {
   return array
     .filter((item): item is string => item !== null && item.trim() !== "")
     .map((item) => `- ${item}`)
     .join("\n");
+}
+
+function getLabelDescription(labelName: string, labels: Label[]): string | undefined {
+  const label = labels.find(l => l.name === labelName);
+  return label?.description;
 }
 
 function labelsToPrompt(
