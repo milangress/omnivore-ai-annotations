@@ -181,7 +181,8 @@ export default async (req: Request): Promise<Response> => {
         true
       );
 
-      const chatgptExample = `tags = [
+      const chatgptExample = { 
+        "tags": [
         {
           "name": "Tag Name",
           "description": "Really short tag description or an empty string"
@@ -194,7 +195,8 @@ export default async (req: Request): Promise<Response> => {
           "name": "Inclusive Knowledge Preservation",
           "description": "Accessibility and long-term preservation of human knowledge"
         }
-      ]`;
+      ]
+    }
 
       const allLabels = await getAllLabelsFromOmnivore(omnivoreHeaders);
       
@@ -213,7 +215,7 @@ export default async (req: Request): Promise<Response> => {
 
       const doTagsPrompt = `Generate a list of useful tags that could be added to this article. Proved them as a JSON array of objects with name and description properties.
       ONLY respond with the JSON array.
-      Example: ${JSON.stringify(chatgptExample)}
+      Example: ${JSON.stringify(chatgptExample, null, 2)}
       Please keep with the existing taxonomy and use the same language as the existing tags. Don’t have multiple tags referring to the same topic. Please reuse existing tags if they are similar.
       Although as I'm an artist, I'm always looking for meaningful connections and metaphors. So if a tag falls outside of the existing structure but makes sense in the context of the article, add it as a new tag.
       ONLY respond with the JSON array!`;
@@ -233,17 +235,53 @@ export default async (req: Request): Promise<Response> => {
       const completionResponse = await openai.chat.completions.create({
         ...JSON.parse(settings),
         messages: [{ role: "user", content: prompt }],
-        response_format: { type: "json_object" }
+        response_format: { 
+          type: "json_schema",
+          schema: {
+            type: "object",
+            properties: {
+              tags: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: {
+                    name: {
+                      type: "string"
+                    },
+                    description: {
+                      type: "string"
+                    }
+                  },
+                  required: ["name", "description"],
+                  additionalProperties: false
+                }
+              }
+            },
+            required: ["tags"]
+          }
+        }
       });
 
-      const generatedTags = completionResponse.choices[0].message.content
-        ?.trim()
-        .split("\n")
-        .map((tag) => tag.trim())
-        .filter(
-          (tag) =>
-            tag && !article.labels.some((existing) => existing.name === tag)
+      // const generatedTags = completionResponse.choices[0].message.content
+      //   ?.trim()
+      //   .split("\n")
+      //   .map((tag) => tag.trim())
+      //   .filter(
+      //     (tag) =>
+      //       tag && !article.labels.some((existing) => existing.name === tag)
+      //   );
+
+      const response = completionResponse.choices[0].message.content;
+      
+      if (!response) {
+        console.log(
+          "No response from OpenAI.",
+          completionResponse.choices[0].message.content
         );
+        return new Response(`No response from OpenAI.`, { status: 500 });
+      }
+
+      const jsonResponse = JSON.parse(response);
 
       if (!generatedTags || generatedTags.length === 0) {
         console.log(
@@ -495,7 +533,7 @@ function labelsToPrompt(
       description: label.description || ""
     }));
     console.log("json: ", json);
-    return `${prePrompt} ${JSON.stringify(json)}`;
+    return `${prePrompt} ${JSON.stringify(json, null, 2)}`;
   } else {  
     const labelString = labelsWithoutAnnotationLabel
       .map((label) => label.name)
