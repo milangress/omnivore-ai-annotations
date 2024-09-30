@@ -215,12 +215,12 @@ export default async (req: Request): Promise<Response> => {
       
       console.log("currentLabelActions: ", currentLabelActions);
 
-      const articleLabelsPrompt = labelsToPrompt(
-        article.labels,
-        annotateLabel,
-        "Existing article tags: ",
-        true
-      );
+      // const articleLabelsPrompt = labelsToPrompt(
+      //   article.labels,
+      //   annotateLabel,
+      //   "Existing article tags: ",
+      //   true
+      // );
 
       const chatgptExample = `tags = [
         {
@@ -237,17 +237,22 @@ export default async (req: Request): Promise<Response> => {
         }
       ]`;
 
-      const allLabels = await getAllLabelsFromOmnivore(omnivoreHeaders);
+      // const allLabels = await getAllLabelsFromOmnivore(omnivoreHeaders);
       
-      console.log("allLabels: ", allLabels);
-      console.log("article.labels: ", article.labels);
+      // console.log("allLabels: ", allLabels);
+      // console.log("article.labels: ", article.labels);
 
-      const allLabelsPrompt = labelsToPrompt(
-        allLabels,
-        annotateLabel,
-        "All labels in Omnivore: ",
-        true
-      );
+      // const allLabelsPrompt = labelsToPrompt(
+      //   allLabels,
+      //   annotateLabel,
+      //   "All labels in Omnivore: ",
+      //   true
+      // );
+
+      const articleLabelsPrompt = 'test article labels prompt'
+      const allLabelsPrompt = 'test all labels prompt'
+
+      
       const doTagsPrompt = `Generate a list of useful tags that could be added to this article. Proved them as a JSON array of objects with name and description properties.
       ONLY respond with the JSON array.
       Example: ${JSON.stringify(chatgptExample)}
@@ -436,11 +441,11 @@ async function getArticle(articleId: string, omnivoreHeaders: Record<string, str
 
   let article = {
     id: articleId,
-    content: articleContent,
     title: articleTitle,
     labels: articleLabels,
     highlights,
-    existingNote: highlights.find(({ type }) => type === "NOTE")
+    existingNote: highlights.find(({ type }) => type === "NOTE"),
+    content: articleContent,
   }
   console.log("Loaded article: ", article);
   return article;
