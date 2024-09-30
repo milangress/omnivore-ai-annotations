@@ -202,6 +202,7 @@ export default async (req: Request): Promise<Response> => {
     const currentLabelActions = resolvedLabelActions("tags");
     // Handle different 'do:' actions 
     if (currentLabelActions) {
+      
       console.log("currentLabelActions: ", currentLabelActions);
 
       const articleLabelsPrompt = labelsToPrompt(
@@ -227,6 +228,7 @@ export default async (req: Request): Promise<Response> => {
       ]`;
 
       const allLabels = await getAllLabelsFromOmnivore(omnivoreHeaders);
+      
       console.log("allLabels: ", allLabels);
       console.log("article.labels: ", article.labels);
 
@@ -473,26 +475,35 @@ function labelsToPrompt(
   labels: Label[],
   annotateLabel: string,
   prePrompt: string,
-  returnJson: boolean = false
+  returnJson: boolean = true
 ): string | null {
   if (labels.length === 0) {
+    console.log("No labels found.");
     return null;
   }
+
   const labelsWithoutAnnotationLabel = labels.filter(
-    (label) => label.name.split(":")[0] !== annotateLabel
+    (label) => !label.name.startsWith(annotateLabel)
   );
+
+  if (labelsWithoutAnnotationLabel.length === 0) {
+    console.log("No labels without annotation label found.");
+    return null;
+  }
+
   if (returnJson) {
     const json = labelsWithoutAnnotationLabel.map((label) => ({
       name: label.name,
       description: label.description || ""
     }));
-    return JSON.stringify(json);
+    console.log("json: ", json);
+    return `${prePrompt} ${JSON.stringify(json)}`;
   } else {  
     const labelString = labelsWithoutAnnotationLabel
       .map((label) => label.name)
       .join(", ");
-    const existingArticleTagsPrompt = `${prePrompt} ${labelString}`;
-    return existingArticleTagsPrompt;
+    console.log("labelString: ", labelString);
+    return `${prePrompt} ${labelString}`;
   }
 }
 
