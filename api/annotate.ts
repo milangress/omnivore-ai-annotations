@@ -6,9 +6,10 @@ export const config = {
 };
 
 interface Label {
-  id: string;
+  //id: string;
   name: string;
-  color: string;
+  //color: string;
+  description: string;
 }
 
 interface LabelPayload {
@@ -67,67 +68,25 @@ interface WebhookPayload {
 
 export default async (req: Request): Promise<Response> => {
   try {
+    const annotateLabel = process.env["OMNIVORE_ANNOTATE_LABEL"] ?? "do";
+
     const body: WebhookPayload = (await req.json()) as WebhookPayload;
     console.log("Received webhook payload:", body);
-    const label = body.label as LabelPayload;
-    const pageCreated = body.page as PagePayload;
 
-    let webhookType: "LABEL_ADDED" | "PAGE_CREATED";
-    // detect webhook type
-    if (label) {
-      webhookType = "LABEL_ADDED";
-    } else if (pageCreated) {
-      webhookType = "PAGE_CREATED";
-    } else {
-      throw new Error("No label or page data found in the webhook payload.");
-    }
-    let articleId = "";
-    // get the label to annotate from the environment
-    const annotateLabel = process.env["OMNIVORE_ANNOTATE_LABEL"] ?? "";
-
-    switch (webhookType) {
-      case "LABEL_ADDED":
-        console.log(`Received LABEL_ADDED webhook.`, label);
-
-        // bail if no label is specified in the environment
-        if (!annotateLabel) {
-          throw new Error("No label specified in environment.");
-        }
-
-        const labels = label?.labels || [label]; // handle one vs multiple labels
-        const labelNames = labels.map((label) => label.name.split(":")[0]); // split at ":" to handle label variants
-        const matchedLabel = labelNames.find(
-          (labelName) => labelName === annotateLabel
-        );
-
-        // bail if a label is specified in the environment but not in the webhook we received
-        if (!matchedLabel) {
-          throw new Error(
-            `Label "${annotateLabel}" does not match any of the labels <${labelNames.join(
-              ", "
-            )}> provided in the webhook.`
-          );
-        }
-        articleId = label.pageId;
-        break;
-
-      case "PAGE_CREATED":
-        console.log(`Received PAGE_CREATED webhook.`, pageCreated);
-        articleId = pageCreated.id;
-        break;
-
-      default:
-        // don't do anything if no label is specified in the environment
-        // and we didn't receive a label in the webhook payload
-        const errorMessage =
-          "Neither label data received nor PAGE_CREATED event.";
-        console.log(errorMessage);
-        return new Response(errorMessage, {
-          status: 400,
-        });
+    // Check if it's a 'do:' action
+    if (!body.action.startsWith("do")) {
+      return new Response("Not a 'do:' action, ignoring.", { status: 200 });
     }
 
-    // STEP 1: fetch the full article content from Omnivore (not part of the webhook payload)
+    const articleId = body.label?.pageId || body.page?.id;
+    if (!articleId) {
+      throw new Error("No article ID found in the webhook payload.");
+    }
+
+    // Transform 'do:' to 'did:'
+    const didAction = body.action.replace("do:", "did:");
+
+    // STEP 1: fetch the full article content and existing labels from Omnivore
     const omnivoreHeaders = {
       "Content-Type": "application/json",
       Authorization: process.env["OMNIVORE_API_KEY"] ?? "",
@@ -166,6 +125,8 @@ export default async (req: Request): Promise<Response> => {
             labels {
               name
               description
+              id
+              color
             }
             highlights(input: { includeFriends: false }) {
               id
@@ -212,68 +173,206 @@ export default async (req: Request): Promise<Response> => {
       ({ name }) => name.split(":")[0] === annotateLabel
     )?.description;
 
-    const existingNote = highlights.find(({ type }) => type === "NOTE");
-
-    if (articleContent.length < 280) {
-      throw new Error(
-        "Article content is less than 280 characters, no need to summarize."
-      );
-    }
-
-    // STEP 2: generate a completion using OpenAI's API
-    const openai = new OpenAI(); // defaults to process.env["OPENAI_API_KEY"]
-    let prompt =
+    const promptFromLabelWithFallback =
       promptFromLabel ||
       process.env["OPENAI_PROMPT"] ||
       "Return a tweet-length TL;DR of the following article.";
-    const model = process.env["OPENAI_MODEL"] || "gpt-4o-mini";
+
+    const existingNote = highlights.find(({ type }) => type === "NOTE");
+
+    const promptBodyArray = [
+      promptFromLabelWithFallback,
+      `Article title: ${articleTitle}`,
+      `Article content: ${articleContent}`,
+      existingNote ? `Existing note: ${existingNote}` : "",
+    ];
+
+    const model = process.env["OPENAI_MODEL"] || "gpt-4-turbo-preview";
     const settings = process.env["OPENAI_SETTINGS"] || `{"model":"${model}"}`;
 
-    const completionResponse = await openai.chat.completions
-      .create({
+    const openai = new OpenAI();
+    // Handle different 'do:' actions
+    if (body.action === "do:tags") {
+      // STEP 2: generate new tags using OpenAI's API
+
+      const articleLabelsPrompt = labelsToPrompt(
+        articleLabels,
+        annotateLabel,
+        "Existing article tags: "
+      );
+
+      const allLabels = await getAllLabelsFromOmnivore(omnivoreHeaders);
+      const allLabelsPrompt = labelsToPrompt(
+        allLabels,
+        annotateLabel,
+        "All labels in Omnivore: "
+      );
+
+      const doTagsPrompt = `Generate a list of useful tags that could be added to this article. Only provide the list of tags, one per line. `;
+      const prompt = arrayToPromptGenerator([
+        doTagsPrompt,
+        ...promptBodyArray,
+        articleLabelsPrompt,
+        allLabelsPrompt,
+      ]);
+
+      const completionResponse = await openai.chat.completions.create({
         ...JSON.parse(settings),
-        messages: [
-          {
-            role: "user",
-            content: `Instruction: ${prompt} 
-Article title: ${articleTitle}
-Article content: ${articleContent}`,
-          },
-        ],
-      })
-      .catch((err) => {
-        throw err;
+        messages: [{ role: "user", content: prompt }],
       });
-    // log stats about response incorporating the prompt, title and usage of
-    console.log(
-      `Fetched completion from OpenAI for article "${articleTitle}" (ID: ${articleId}) using prompt "${prompt}": ${JSON.stringify(
-        completionResponse.usage
-      )}`
+
+      const generatedTags = completionResponse.choices[0].message.content
+        ?.trim()
+        .split("\n")
+        .map((tag) => tag.trim())
+        .filter(
+          (tag) =>
+            tag && !articleLabels.some((existing) => existing.name === tag)
+        );
+
+      if (!generatedTags || generatedTags.length === 0) {
+        console.log(
+          "No new tags generated.",
+          completionResponse.choices[0].message.content
+        );
+        return new Response(`No new tags generated.`, { status: 200 });
+      }
+
+      console.log(`Generated tags: ${generatedTags.join(", ")}`);
+
+      const labels = [
+        ...articleLabels.map((label) => label.name),
+        ...generatedTags,
+        didAction,
+      ];
+
+      await addLabelsToOmnivoreArticle(
+        articleId,
+        generatedTags,
+        omnivoreHeaders
+      );
+
+      return new Response(
+        `New tags added to the article and action updated to did: action.`,
+        { status: 200 }
+      );
+    } else if (body.action.startsWith("do:")) {
+      const prompt = arrayToPromptGenerator([...promptBodyArray]);
+
+      const completionResponse = await openai.chat.completions.create({
+        ...JSON.parse(settings),
+        messages: [{ role: "user", content: prompt }],
+      });
+
+      const generatedResponse = completionResponse.choices[0].message.content
+        ?.trim()
+        .replace(/\\/g, "\\\\")
+        .replace(/"/g, '\\"');
+
+      if (!generatedResponse) {
+        console.log(
+          "No generated response from OpenAI.",
+          completionResponse.choices[0].message.content
+        );
+        return new Response(`No generated response from OpenAI.`, {
+          status: 500,
+        });
+      }
+
+      await applyAnnotationToOmnivoreArticle(
+        articleId,
+        generatedResponse,
+        omnivoreHeaders,
+        existingNote
+      );
+      return new Response(`Annotation applied to the article.`, {
+        status: 200,
+      });
+    } else {
+      return new Response(`Unhandled action: ${body.action}`, { status: 400 });
+    }
+  } catch (error) {
+    return new Response(
+      `Error processing Omnivore webhook: ${(error as Error).message}`,
+      { status: 500 }
     );
+  }
+};
 
-    const articleAnnotation = (
-      completionResponse?.choices?.[0].message?.content || ""
-    )
-      .trim()
-      .replace(/\\/g, "\\\\")
-      .replace(/"/g, '\\"');
+function arrayToPromptGenerator(array: (string | null)[]): string {
+  return array
+    .filter((item): item is string => item !== null && item.trim() !== "")
+    .map((item) => `- ${item}`)
+    .join("\n");
+}
 
-    // STEP 3: Update Omnivore article with OpenAI completion
+function labelsToPrompt(
+  labels: Label[],
+  annotateLabel: string,
+  prePrompt: string
+): string | null {
+  if (labels.length === 0) {
+    return null;
+  }
+  const labelsWithoutAnnotationLabel = labels.filter(
+    (label) => label.name.split(":")[0] !== annotateLabel
+  );
+  const labelString = labelsWithoutAnnotationLabel
+    .map((label) => label.name)
+    .join(", ");
+  const existingArticleTagsPrompt = `${prePrompt} ${labelString}`;
+  return existingArticleTagsPrompt;
+}
 
-    let mutationQuery: {
-      query: string;
-      variables: {
-        input: {
-          highlightId?: string;
-          annotation: string;
-          type?: string;
-          id?: string;
-          shortId?: string;
-          articleId?: string;
-        };
-      };
-    };
-    const fragment = `
+async function getAllLabelsFromOmnivore(
+  omnivoreHeaders: Record<string, string>
+): Promise<Label[]> {
+  const labelsQuery = {
+    query: `
+      query {
+        labels {
+          ... on LabelsSuccess {
+            labels {
+              id
+              name
+              color
+              description
+              createdAt
+            }
+          }
+          ... on LabelsError {
+            errorCodes
+          }
+        }
+      }
+    `,
+  };
+
+  try {
+    const response = await fetch("https://api-prod.omnivore.app/api/graphql", {
+      method: "POST",
+      headers: omnivoreHeaders,
+      body: JSON.stringify(labelsQuery),
+    });
+
+    const data = await response.json();
+
+    if (data.data && data.data.labels && data.data.labels.labels) {
+      return data.data.labels.labels;
+    } else if (data.data && data.data.labels && data.data.labels.errorCodes) {
+      throw new Error(
+        `Failed to fetch labels: ${data.data.labels.errorCodes.join(", ")}`
+      );
+    } else {
+      throw new Error("Unexpected response structure");
+    }
+  } catch (error) {
+    console.error("Error fetching labels:", error);
+    throw error;
+  }
+}
+
+let baseFragment = `
   fragment HighlightFields on Highlight {
     id
     type
@@ -296,13 +395,63 @@ Article content: ${articleContent}`,
       color
       createdAt
     }
-  }`;
+  `;
+
+function applyAnnotationToOmnivoreArticle(
+  articleId: string,
+  annotation: string,
+  omnivoreHeaders: Record<string, string>,
+  existingNote: { id: string; type: string } | null | undefined
+) {
+  if (existingNote) {
+    return updateAnnotationInOmnivoreArticle(
+      articleId,
+      annotation,
+      omnivoreHeaders,
+      existingNote
+    );
+  } else {
+    return addAnnotationToOmnivoreArticle(
+      articleId,
+      annotation,
+      omnivoreHeaders
+    );
+  }
+}
+
+async function updateAnnotationInOmnivoreArticle(
+  articleId: string,
+  annotation: string,
+  omnivoreHeaders: Record<string, string>,
+  existingNote: { id: string; type: string }
+) {
+  if (!existingNote) {
+    return new Response(
+      `No existing note found in Omnivore article: ${articleId}`,
+      { status: 404 }
+    );
+  }
+
+  try {
+    let mutationQuery: {
+      query: string;
+      variables: {
+        input: {
+          highlightId?: string;
+          annotation: string;
+          type?: string;
+          id?: string;
+          shortId?: string;
+          articleId?: string;
+        };
+      };
+    };
 
     // Omnivore UI only shows one highlight note per article so
     // if we have an existing note, update it; otherwise, create a new one
-    if (existingNote) {
-      mutationQuery = {
-        query: `mutation UpdateHighlight($input: UpdateHighlightInput!) {
+
+    mutationQuery = {
+      query: `mutation UpdateHighlight($input: UpdateHighlightInput!) {
       updateHighlight(input: $input) {
         ... on UpdateHighlightSuccess {
           highlight {
@@ -313,42 +462,14 @@ Article content: ${articleContent}`,
           errorCodes
         }
       }
-    }${fragment}`,
-        variables: {
-          input: {
-            highlightId: existingNote.id,
-            annotation: articleAnnotation,
-          },
+    }${baseFragment}`,
+      variables: {
+        input: {
+          highlightId: existingNote.id,
+          annotation: annotation,
         },
-      };
-    } else {
-      const id = uuidv4();
-      const shortId = id.substring(0, 8);
-
-      mutationQuery = {
-        query: `mutation CreateHighlight($input: CreateHighlightInput!) {
-      createHighlight(input: $input) {
-        ... on CreateHighlightSuccess {
-          highlight {
-            ...HighlightFields
-          }
-        }
-        ... on CreateHighlightError {
-          errorCodes
-        }
-      }
-    }${fragment}`,
-        variables: {
-          input: {
-            type: "NOTE",
-            id: id,
-            shortId: shortId,
-            articleId: articleId,
-            annotation: articleAnnotation,
-          },
-        },
-      };
-    }
+      },
+    };
 
     const OmnivoreAnnotationRequest = await fetch(
       "https://api-prod.omnivore.app/api/graphql",
@@ -361,7 +482,7 @@ Article content: ${articleContent}`,
     const OmnivoreAnnotationResponse =
       (await OmnivoreAnnotationRequest.json()) as { data: unknown };
     console.log(
-      `Article annotation added to article "${articleTitle}" (ID: ${articleId}): ${JSON.stringify(
+      `Article annotation added to article "${articleId}" (ID: ${articleId}): ${JSON.stringify(
         OmnivoreAnnotationResponse.data
       )}`,
       `Used this GraphQL query: ${JSON.stringify(mutationQuery)}`
@@ -376,4 +497,124 @@ Article content: ${articleContent}`,
       { status: 500 }
     );
   }
-};
+}
+async function addAnnotationToOmnivoreArticle(
+  articleId: string,
+  annotation: string,
+  omnivoreHeaders: Record<string, string>
+) {
+  try {
+    let mutationQuery: {
+      query: string;
+      variables: {
+        input: {
+          highlightId?: string;
+          annotation: string;
+          type?: string;
+          id?: string;
+          shortId?: string;
+          articleId?: string;
+        };
+      };
+    };
+
+    const id = uuidv4();
+    const shortId = id.substring(0, 8);
+
+    mutationQuery = {
+      query: `mutation CreateHighlight($input: CreateHighlightInput!) {
+  createHighlight(input: $input) {
+    ... on CreateHighlightSuccess {
+      highlight {
+        ...HighlightFields
+      }
+    }
+    ... on CreateHighlightError {
+      errorCodes
+    }
+  }
+}${baseFragment}`,
+      variables: {
+        input: {
+          type: "NOTE",
+          id: id,
+          shortId: shortId,
+          articleId: articleId,
+          annotation: annotation,
+        },
+      },
+    };
+
+    const OmnivoreAnnotationRequest = await fetch(
+      "https://api-prod.omnivore.app/api/graphql",
+      {
+        method: "POST",
+        headers: omnivoreHeaders,
+        body: JSON.stringify(mutationQuery),
+      }
+    );
+    const OmnivoreAnnotationResponse =
+      (await OmnivoreAnnotationRequest.json()) as { data: unknown };
+    console.log(
+      `Article annotation added to article "${articleId}" (ID: ${articleId}): ${JSON.stringify(
+        OmnivoreAnnotationResponse.data
+      )}`,
+      `Used this GraphQL query: ${JSON.stringify(mutationQuery)}`
+    );
+
+    return new Response(`Article annotation added.`);
+  } catch (error) {
+    return new Response(
+      `Error adding annotation to Omnivore article: ${
+        (error as Error).message
+      }`,
+      { status: 500 }
+    );
+  }
+}
+
+async function addLabelsToOmnivoreArticle(
+  articleId: string,
+  labels: string[],
+  omnivoreHeaders: Record<string, string>
+) {
+  // STEP 3: Add new tags to the article
+  const addLabelsMutation = {
+    query: `mutation SetLabels($input: SetLabelsInput!) {
+      setLabels(input: $input) {
+        ... on SetLabelsSuccess {
+          labels {
+            name
+          }
+        }
+        ... on SetLabelsError {
+          errorCodes
+        }
+      }
+    }`,
+    variables: {
+      input: {
+        articleID: articleId,
+        labels: labels,
+      },
+    },
+  };
+
+  const addLabelsRequest = await fetch(
+    "https://api-prod.omnivore.app/api/graphql",
+    {
+      method: "POST",
+      headers: omnivoreHeaders,
+      body: JSON.stringify(addLabelsMutation),
+    }
+  );
+  const addLabelsResponse = await addLabelsRequest.json();
+  console.log(
+    `Labels added to article "${articleId}" (ID: ${articleId}):`,
+    addLabelsResponse
+  );
+
+  return new Response(
+    `New tags added to the article and action updated to did: action.`
+  );
+}
