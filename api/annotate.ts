@@ -19,7 +19,6 @@ interface LabelAction {
   action: string;
   prompts: string[];
   description: string | undefined;
-  done: boolean;
 }
 
 
@@ -161,46 +160,21 @@ export default async (req: Request): Promise<Response> => {
     const article = await getArticle(articleId, omnivoreHeaders);
 
 
-
-    function getLabelAction(matchingLabels: string[], article: Article): LabelAction[] {
-      return matchingLabels.map(label => {
-        const description = getLabelDescription(label, article.labels);
-        const promptWithFallback = description || process.env["OPENAI_PROMPT"] || "Return a tweet-length TL;DR of the following article.";
-
-        const promptBodyArray = (promptWithFallback: string) :string[] => [
-          promptWithFallback,
-          `Article title: ${article.title}`,
-          `Article content: ${article.content}`,
-          article.existingNote ? `Existing note: ${article.existingNote}` : "",
-        ];
-
-        return {
-          label: label,
-          replacedLabel: label.replace(`${annotateLabel}:`, "did:"),
-          processLabel: label.split(":")[0],
-          action: label.split(":")[1],
-          description,
-          prompts: promptBodyArray(promptWithFallback),
-          done: false,
-        }
-      });
-    } 
-
-    const labelActions = getLabelAction(matchingLabels, article);
+    const labelActions = getLabelAction(matchingLabels, article, annotateLabel);
 
     const model = process.env["OPENAI_MODEL"] || "gpt-4-turbo-preview";
     const settings = process.env["OPENAI_SETTINGS"] || `{"model":"${model}"}`;
 
-  
 
-
-    const currentLabelActions = resolvedLabelActions("tags", labelActions);
-    console.log("PRE currentLabelActions: ", currentLabelActions);
-    console.log("if: ", currentLabelActions, currentLabelActions && currentLabelActions.action === "tags");
+    const { found, action } = resolvedLabelActions("tags", labelActions);
+    console.log("Found 'tags' action:", found);
+    console.log("Matching LabelAction:", action);
     // Handle different 'do:' actions 
-    if (true) {
+    if (found) {
+
+      const currentLabelActions = action
       
-      console.log("TAGS currentLabelActions: ", currentLabelActions);
+      console.log("TAGS currentLabelActions: ", action);
 
       // const articleLabelsPrompt = labelsToPrompt(
       //   article.labels,
@@ -353,10 +327,15 @@ export default async (req: Request): Promise<Response> => {
   }
 };
 
-const resolvedLabelActions = (currentAction: string, myLabelAction: LabelAction[] ) => {
-  return myLabelAction.find(label => {
-    label.action === currentAction && label.done === false
-  })
+const resolvedLabelActions = (currentAction: string, myLabelAction: LabelAction[]): { found: boolean; action: LabelAction | null } => {
+  const matchingAction = myLabelAction.find(label => 
+    label.action === currentAction
+  );
+  
+  return {
+    found: !!matchingAction,
+    action: matchingAction || null
+  };
 }
 
 const hasOpenLabelActions = (myLabelAction: LabelAction[])   => {
@@ -469,6 +448,29 @@ function getLabelDescription(labelName: string, labels: Label[]): string | undef
   const label = labels.find(l => l.name === labelName);
   return label?.description;
 }
+
+function getLabelAction(matchingLabels: string[], article: Article, annotateLabel: string ): LabelAction[] {
+  return matchingLabels.map(label => {
+    const description = getLabelDescription(label, article.labels);
+    const promptWithFallback = description || process.env["OPENAI_PROMPT"] || "Return a tweet-length TL;DR of the following article.";
+
+    const promptBodyArray = (promptWithFallback: string) :string[] => [
+      promptWithFallback,
+      `Article title: ${article.title}`,
+      `Article content: ${article.content}`,
+      article.existingNote ? `Existing note: ${article.existingNote}` : "",
+    ];
+
+    return {
+      label: label,
+      replacedLabel: label.replace(`${annotateLabel}:`, "did:"),
+      processLabel: label.split(":")[0],
+      action: label.split(":")[1],
+      description,
+      prompts: promptBodyArray(promptWithFallback)
+    }
+  });
+} 
 
 function labelsToPrompt(
   labels: Label[],
