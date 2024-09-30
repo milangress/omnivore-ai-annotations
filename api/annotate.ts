@@ -191,7 +191,6 @@ export default async (req: Request): Promise<Response> => {
     const model = process.env["OPENAI_MODEL"] || "gpt-4-turbo-preview";
     const settings = process.env["OPENAI_SETTINGS"] || `{"model":"${model}"}`;
 
-    const openai = new OpenAI();
   
 
 
@@ -259,6 +258,7 @@ export default async (req: Request): Promise<Response> => {
 
       console.log("prompt: ", prompt);
 
+      const openai = new OpenAI();
       const completionResponse = await openai.chat.completions.create({
         ...JSON.parse(settings),
         messages: [{ role: "user", content: prompt }],
@@ -310,6 +310,7 @@ export default async (req: Request): Promise<Response> => {
       }
       const prompt = arrayToPromptGenerator([...currentLabelAction.prompts]);
 
+      const openai = new OpenAI();
       const completionResponse = await openai.chat.completions.create({
         ...JSON.parse(settings),
         messages: [{ role: "user", content: prompt }],
