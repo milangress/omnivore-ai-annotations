@@ -168,19 +168,18 @@ export default async (req: Request): Promise<Response> => {
     const { found, action } = resolvedLabelActions("tags", labelActions);
     console.log("Found 'tags' action:", found);
     console.log("Matching LabelAction:", action);
-    // Handle different 'do:' actions 
     if (found) {
 
       const currentLabelActions = action
       
       console.log("TAGS currentLabelActions: ", action);
 
-      // const articleLabelsPrompt = labelsToPrompt(
-      //   article.labels,
-      //   annotateLabel,
-      //   "Existing article tags: ",
-      //   true
-      // );
+      const articleLabelsPrompt = labelsToPrompt(
+        article.labels,
+        annotateLabel,
+        "Existing article tags: ",
+        true
+      );
 
       const chatgptExample = `tags = [
         {
@@ -197,20 +196,19 @@ export default async (req: Request): Promise<Response> => {
         }
       ]`;
 
-      // const allLabels = await getAllLabelsFromOmnivore(omnivoreHeaders);
+      const allLabels = await getAllLabelsFromOmnivore(omnivoreHeaders);
       
-      // console.log("allLabels: ", allLabels);
-      // console.log("article.labels: ", article.labels);
+      console.log("allLabels: ", allLabels);
+      console.log("article.labels: ", article.labels);
 
-      // const allLabelsPrompt = labelsToPrompt(
-      //   allLabels,
-      //   annotateLabel,
-      //   "All labels in Omnivore: ",
-      //   true
-      // );
+      const allLabelsPrompt = labelsToPrompt(
+        allLabels,
+        annotateLabel,
+        "All labels in Omnivore: ",
+        true
+      );
 
-      const articleLabelsPrompt = 'test article labels prompt'
-      const allLabelsPrompt = 'test all labels prompt'
+
 
 
       const doTagsPrompt = `Generate a list of useful tags that could be added to this article. Proved them as a JSON array of objects with name and description properties.
