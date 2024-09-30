@@ -102,17 +102,24 @@ interface WebhookPayload {
 }
 
 export default async (req: Request): Promise<Response> => {
+  const requestId = uuidv4(); // Generate a unique ID for this request
+  console.log(`[${requestId}] Starting request processing`);
+
   try {
     const annotateLabel = process.env["OMNIVORE_ANNOTATE_LABEL"] ?? "do";
+    console.log(`[${requestId}] Annotate label: ${annotateLabel}`);
 
     const body: WebhookPayload = (await req.json()) as WebhookPayload;
-    console.log("Received webhook payload:", body);
+    console.log(`[${requestId}] Received webhook payload:`, JSON.stringify(body));
 
     // Update the labels handling
     const labels = (body.label?.labels || [])
       .filter((label): label is WebhookLabel => !!label && typeof label === 'object' && 'name' in label)
     
+    console.log(`[${requestId}] Filtered labels:`, JSON.stringify(labels));
+
     if (labels.length === 0) {
+      console.log(`[${requestId}] No labels found in the webhook payload.`);
       return new Response(`No labels found in the webhook payload.`, { status: 400 });
     }
     
@@ -123,7 +130,10 @@ export default async (req: Request): Promise<Response> => {
       )
       .map(label => label.name);
 
+    console.log(`[${requestId}] Matching labels:`, JSON.stringify(matchingLabels));
+
     if (matchingLabels.length === 0) {
+      console.log(`[${requestId}] No '${annotateLabel}' labels found.`);
       return new Response(`No '${annotateLabel}' labels found. Expected at least one '${annotateLabel}' or '${annotateLabel}:*' label.`, { status: 400 });
     }
 
@@ -361,6 +371,7 @@ export default async (req: Request): Promise<Response> => {
       return new Response(`Unhandled action: ${body.action}`, { status: 400 });
     }
   } catch (error) {
+    console.error(`[${requestId}] Error processing Omnivore webhook:`, error);
     return new Response(
       `Error processing Omnivore webhook: ${(error as Error).message}`,
       { status: 500 }
