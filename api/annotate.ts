@@ -266,31 +266,7 @@ export default async (req: Request): Promise<Response> => {
       const completionResponse = await openai.chat.completions.create({
         ...JSON.parse(settings),
         messages: [{ role: "user", content: prompt }],
-        response_format: { 
-          type: "json_schema",
-          schema: {
-            type: "object",
-            properties: {
-              tags: {
-                type: "array",
-                items: {
-                  type: "object",
-                  properties: {
-                    name: {
-                      type: "string"
-                    },
-                    description: {
-                      type: "string"
-                    }
-                  },
-                  required: ["name", "description"],
-                  additionalProperties: false
-                }
-              }
-            },
-            required: ["tags"]
-          }
-        }
+        response_format: { type: "json_object" }
       });
 
       const generatedTags = completionResponse.choices[0].message.content
