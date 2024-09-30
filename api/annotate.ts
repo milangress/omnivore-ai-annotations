@@ -6,9 +6,9 @@ export const config = {
 };
 
 interface Label {
-  //id: string;
+  id?: string;
   name: string;
-  //color: string;
+  color?: string;
   description: string;
 }
 
@@ -17,6 +17,7 @@ interface LabelAction {
   replacedLabel: string;
   processLabel: string;
   action: string;
+  labelData: Label | undefined;
   prompts: string[];
   description: string | undefined;
 }
@@ -319,7 +320,10 @@ export default async (req: Request): Promise<Response> => {
         {name: currentLabelActions.replacedLabel},
       ];
 
-      await addLabelsToOmnivoreArticle(article.id, newLabels, omnivoreHeaders);
+
+      await deleteLabel(currentLabelActions.labelData?.id, omnivoreHeaders);
+
+      await applyLabelToOmnivoreArticle(article.id, newLabels, allLabels, omnivoreHeaders);
 
       return new Response(
         `New tags added to the article and action updated to did: action.`,
@@ -506,6 +510,14 @@ function getLabelDescription(
   return label?.description;
 }
 
+function getLabelFromLabelList(
+  labelName: string,
+  labels: Label[]
+): string | undefined {
+  const label = labels.find((l) => l.name === labelName);
+  return label
+}
+
 function getLabelAction(
   matchingLabels: string[],
   article: Article,
@@ -530,6 +542,7 @@ function getLabelAction(
       replacedLabel: label.replace(`${annotateLabel}:`, "did:"),
       processLabel: label.split(":")[0],
       action: label.split(":")[1],
+      labelData: getLabelFromLabelList(label, article.labels),
       description,
       prompts: promptBodyArray(promptWithFallback),
     };
@@ -623,54 +636,239 @@ async function getAllLabelsFromOmnivore(
   }
 }
 
-async function setLabels(
-  pageId: string,
-  labels: Label[],
+
+async function createLabel(
+  name: string,
+  color?: string,
+  description?: string,
   omnivoreHeaders: Record<string, string>
-): Promise<void> {
-  console.log("Setting labels:", labels);
-  const mutation = `mutation SetLabels($input: SetLabelsInput!) {
-    setLabels(input: $input) {
-      ... on SetLabelsSuccess {
-        labels {
-          ...LabelFields
+): Promise<{ success: boolean; label?: Label; error?: string }> {
+  const mutation = `
+    mutation CreateLabel($input: CreateLabelInput!) {
+      createLabel(input: $input) {
+        ... on CreateLabelSuccess {
+          label {
+            id
+            name
+            color
+            description
+            createdAt
+          }
+        }
+        ... on CreateLabelError {
+          errorCodes
         }
       }
-      ... on SetLabelsError {
-        errorCodes
+    }
+  `;
+
+  const variables = {
+    input: {
+      name,
+      color,
+      description,
+    },
+  };
+
+  try {
+    const response = await fetch("https://api-prod.omnivore.app/api/graphql", {
+      method: "POST",
+      headers: {
+        ...omnivoreHeaders,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ query: mutation, variables }),
+    });
+
+    const result = await response.json();
+
+    if (result.errors) {
+      console.error("GraphQL errors:", result.errors);
+      return { success: false, error: "GraphQL errors occurred" };
+    }
+
+    const data = result.data.createLabel;
+
+    if (data.label) {
+      return { success: true, label: data.label };
+    } else if (data.errorCodes) {
+      console.error("Label creation failed:", data.errorCodes);
+      return { success: false, error: `Label creation failed: ${data.errorCodes.join(", ")}` };
+    } else {
+      return { success: false, error: "Unexpected response structure" };
+    }
+  } catch (error) {
+    console.error("Error creating label:", error);
+    return { success: false, error: `Error creating label: ${(error as Error).message}` };
+  }
+}
+
+async function deleteLabel(
+  labelId: string,
+  omnivoreHeaders: Record<string, string>
+): Promise<{ success: boolean; error?: string }> {
+  const mutation = `
+    mutation DeleteLabel($id: ID!) {
+      deleteLabel(id: $id) {
+        ... on DeleteLabelSuccess {
+          label {
+            id
+            name
+            color
+            description
+          }
+        }
+        ... on DeleteLabelError {
+          errorCodes
+        }
+      }
+    }
+  `;
+
+  const variables = {
+    id: labelId,
+  };
+
+  try {
+    const response = await fetch("https://api-prod.omnivore.app/api/graphql", {
+      method: "POST",
+      headers: {
+        ...omnivoreHeaders,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ query: mutation, variables }),
+    });
+
+    const result = await response.json();
+
+    if (result.errors) {
+      console.error("GraphQL errors:", result.errors);
+      return { success: false, error: "GraphQL errors occurred" };
+    }
+
+    const data = result.data.deleteLabel;
+
+    if (data.label) {
+      console.log(`Label "${data.label.name}" (ID: ${data.label.id}) deleted successfully.`);
+      return { success: true };
+    } else if (data.errorCodes) {
+      console.error("Label deletion failed:", data.errorCodes);
+      return { success: false, error: `Label deletion failed: ${data.errorCodes.join(", ")}` };
+    } else {
+      return { success: false, error: "Unexpected response structure" };
+    }
+  } catch (error) {
+    console.error("Error deleting label:", error);
+    return { success: false, error: `Error deleting label: ${(error as Error).message}` };
+  }
+}
+
+
+function applyLabelToOmnivoreArticle(
+  articleId: string,
+  labels: Partial<Label>[],
+  allLabels: Label[],
+  omnivoreHeaders: Record<string, string>
+) {
+  const existingLabelsMap = new Map(allLabels.map(label => [label.name.toLowerCase(), label]));
+
+  const processedLabels = labels.map(label => {
+    if (!label.name) return label; // Skip if no name is provided
+    const existingLabel = existingLabelsMap.get(label.name.toLowerCase());
+    return existingLabel || { name: label.name, color: label.color, description: label.description };
+  });
+
+  return addLabelsToOmnivoreArticle(articleId, processedLabels, omnivoreHeaders);
+}
+  
+
+// Update the existing addLabelsToOmnivoreArticle function
+async function addLabelsToOmnivoreArticle(
+  articleId: string,
+  labels: Partial<Label>[],
+  omnivoreHeaders: Record<string, string>
+) {
+  console.log('addLabelsToOmnivoreArticle', labels);
+
+  // First, ensure all labels exist
+  for (const label of labels) {
+    if (!label.id) {
+      // If the label doesn't have an ID, it's a new label that needs to be created
+      const result = await createLabel(label.name, label.color, label.description, omnivoreHeaders);
+      if (!result.success) {
+        console.error(`Failed to create label "${label.name}":`, result.error);
+        // You might want to handle this error, e.g., by skipping this label or returning an error
+      } else if (result.label) {
+        label.id = result.label.id; // Update the label with the newly created ID
       }
     }
   }
-  
-  fragment LabelFields on Label {
-    id
-    name
-    color
-    description
-    createdAt
-  }`;
 
-  const labelIds = labels.map((it) => it.id);
-
-  const response = await fetch("https://api-prod.omnivore.app/api/graphql", {
-    method: "POST",
-    headers: {
-      ...omnivoreHeaders,
-      "Content-Type": "application/json",
+  // Now proceed with setting the labels on the article
+  const setLabelsMutation = {
+    query: `mutation SetLabels($input: SetLabelsInput!) {
+      setLabels(input: $input) {
+        ... on SetLabelsSuccess {
+          labels {
+            id
+            name
+            color
+            description
+          }
+        }
+        ... on SetLabelsError {
+          errorCodes
+        }
+      }
+    }`,
+    variables: {
+      input: {
+        pageId: articleId,
+        labelIds: labels.map(label => label.id).filter(Boolean),
+      },
     },
-    body: JSON.stringify({
-      query: mutation,
-      variables: { input: { pageId, labelIds } },
-    }),
-  });
+  };
 
-  const result = await response.json();
-
-  if (result.errors) {
-    throw new Error(`Failed to set labels: ${result.errors[0].message}`);
+  try {
+    const setLabelsRequest = await fetch(
+      "https://api-prod.omnivore.app/api/graphql",
+      {
+        method: "POST",
+        headers: omnivoreHeaders,
+        body: JSON.stringify(setLabelsMutation),
+      }
+    );
+    const setLabelsResponse = await setLabelsRequest.json();
+    
+    if (setLabelsResponse.data?.setLabels?.labels) {
+      console.log(
+        `Labels set on article "${articleId}":`,
+        setLabelsResponse.data.setLabels.labels
+      );
+      return new Response(
+        `New tags added to the article and action updated to did: action.`,
+        { status: 200 }
+      );
+    } else if (setLabelsResponse.data?.setLabels?.errorCodes) {
+      console.error(
+        `Failed to set labels on article "${articleId}":`,
+        setLabelsResponse.data.setLabels.errorCodes
+      );
+      return new Response(
+        `Failed to set labels: ${setLabelsResponse.data.setLabels.errorCodes.join(", ")}`,
+        { status: 400 }
+      );
+    } else {
+      console.error("Unexpected response structure:", setLabelsResponse);
+      return new Response("Unexpected response structure", { status: 500 });
+    }
+  } catch (error) {
+    console.error(`Error setting labels on article "${articleId}":`, error);
+    return new Response(
+      `Error setting labels: ${(error as Error).message}`,
+      { status: 500 }
+    );
   }
-
-  console.log("Labels set successfully:", result.data.setLabels);
 }
 
 let baseFragment = `
@@ -872,53 +1070,4 @@ async function addAnnotationToOmnivoreArticle(
       { status: 500 }
     );
   }
-}
-
-async function addLabelsToOmnivoreArticle(
-  articleId: string,
-  labels: string[],
-  omnivoreHeaders: Record<string, string>
-) {
-
-  console.log('addLabelsToOmnivoreArticle', labels)
-
-  // STEP 3: Add new tags to the article
-  const addLabelsMutation = {
-    query: `mutation SetLabels($input: SetLabelsInput!) {
-      setLabels(input: $input) {
-        ... on SetLabelsSuccess {
-          labels {
-            name
-          }
-        }
-        ... on SetLabelsError {
-          errorCodes
-        }
-      }
-    }`,
-    variables: {
-      input: {
-        articleID: articleId,
-        labels: labels,
-      },
-    },
-  };
-
-  const addLabelsRequest = await fetch(
-    "https://api-prod.omnivore.app/api/graphql",
-    {
-      method: "POST",
-      headers: omnivoreHeaders,
-      body: JSON.stringify(addLabelsMutation),
-    }
-  );
-  const addLabelsResponse = await addLabelsRequest.json();
-  console.log(
-    `Labels added to article "${articleId}" (ID: ${articleId}):`,
-    addLabelsResponse
-  );
-
-  return new Response(
-    `New tags added to the article and action updated to did: action.`
-  );
 }
