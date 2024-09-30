@@ -213,7 +213,7 @@ export default async (req: Request): Promise<Response> => {
     // Handle different 'do:' actions 
     if (currentLabelActions) {
       
-      console.log("currentLabelActions: ", currentLabelActions);
+      console.log("TAGS currentLabelActions: ", currentLabelActions);
 
       // const articleLabelsPrompt = labelsToPrompt(
       //   article.labels,
@@ -259,7 +259,7 @@ export default async (req: Request): Promise<Response> => {
       Please keep with the existing taxonomy and use the same language as the existing tags. Don’t have multiple tags referring to the same topic. Please reuse existing tags if they are similar.
       Although as I'm an artist, I'm always looking for meaningful connections and metaphors. So if a tag falls outside of the existing structure but makes sense in the context of the article, add it as a new tag.
       ONLY respond with the JSON array!`;
-      
+
       console.log("doTagsPrompt: ", doTagsPrompt);
 
       const prompt = arrayToPromptGenerator([
