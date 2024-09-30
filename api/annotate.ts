@@ -252,13 +252,16 @@ export default async (req: Request): Promise<Response> => {
       const articleLabelsPrompt = 'test article labels prompt'
       const allLabelsPrompt = 'test all labels prompt'
 
-      
+
       const doTagsPrompt = `Generate a list of useful tags that could be added to this article. Proved them as a JSON array of objects with name and description properties.
       ONLY respond with the JSON array.
       Example: ${JSON.stringify(chatgptExample)}
       Please keep with the existing taxonomy and use the same language as the existing tags. Don’t have multiple tags referring to the same topic. Please reuse existing tags if they are similar.
       Although as I'm an artist, I'm always looking for meaningful connections and metaphors. So if a tag falls outside of the existing structure but makes sense in the context of the article, add it as a new tag.
       ONLY respond with the JSON array!`;
+      
+      console.log("doTagsPrompt: ", doTagsPrompt);
+
       const prompt = arrayToPromptGenerator([
         doTagsPrompt,
         ...currentLabelActions.prompts,
@@ -453,7 +456,7 @@ async function getArticle(articleId: string, omnivoreHeaders: Record<string, str
 
 function arrayToPromptGenerator(array: (string | null)[]): string {
   return array
-    .filter((item): item is string => item !== null && item.trim() !== "")
+    .filter((item): item is string => item !== null)
     .map((item) => `- ${item}`)
     .join("\n");
 }
