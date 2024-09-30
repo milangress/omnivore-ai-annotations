@@ -453,6 +453,7 @@ async function getArticle(articleId: string, omnivoreHeaders: Record<string, str
     highlights,
     existingNote: highlights.find(({ type }) => type === "NOTE")
   }
+  console.log("Loaded article: ", article);
   return article;
 }
 
