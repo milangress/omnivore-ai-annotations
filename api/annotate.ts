@@ -196,6 +196,8 @@ export default async (req: Request): Promise<Response> => {
 
 
     const currentLabelActions = resolvedLabelActions("tags", labelActions);
+    console.log("PRE currentLabelActions: ", currentLabelActions);
+    console.log("if: ", currentLabelActions, currentLabelActions.action === "tags", currentLabelActions && currentLabelActions.action === "tags");
     // Handle different 'do:' actions 
     if (currentLabelActions && currentLabelActions.action === "tags") {
       
