@@ -202,7 +202,8 @@ export default async (req: Request): Promise<Response> => {
     const currentLabelActions = resolvedLabelActions("tags");
     // Handle different 'do:' actions 
     if (currentLabelActions) {
-      
+      console.log("currentLabelActions: ", currentLabelActions);
+
       const articleLabelsPrompt = labelsToPrompt(
         article.labels,
         annotateLabel,
@@ -318,6 +319,7 @@ export default async (req: Request): Promise<Response> => {
     } 
     else if (hasOpenLabelActions().hasOpen) {
       const currentLabelAction = hasOpenLabelActions().nextAction;
+      console.log("currentLabelAction: ", currentLabelAction);
       if (!currentLabelAction) {
         return new Response(`No current label action found.`, { status: 400 });
       }
@@ -353,6 +355,7 @@ export default async (req: Request): Promise<Response> => {
         status: 200,
       });
     } else {
+      console.log("Unhandled action: ", body.action);
       return new Response(`Unhandled action: ${body.action}`, { status: 400 });
     }
   } catch (error) {
@@ -650,13 +653,13 @@ async function updateAnnotationInOmnivoreArticle(
     const OmnivoreAnnotationResponse =
       (await OmnivoreAnnotationRequest.json()) as { data: unknown };
     console.log(
-      `Article annotation added to article "${articleId}" (ID: ${articleId}): ${JSON.stringify(
+      `Article annotation updated to article "${articleId}" (ID: ${articleId}): ${JSON.stringify(
         OmnivoreAnnotationResponse.data
       )}`,
       `Used this GraphQL query: ${JSON.stringify(mutationQuery)}`
     );
 
-    return new Response(`Article annotation added.`);
+    return new Response(`Article annotation updated.`);
   } catch (error) {
     return new Response(
       `Error adding annotation to Omnivore article: ${
