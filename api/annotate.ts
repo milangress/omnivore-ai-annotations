@@ -315,9 +315,9 @@ export default async (req: Request): Promise<Response> => {
 
 
       const newLabels = [
-        ...article.labels,
+        //...article.labels,
         ...generatedTags.tags,
-        {name: currentLabelActions.replacedLabel},
+        {name: currentLabelActions.replacedLabel, description: ''},
       ];
 
 
