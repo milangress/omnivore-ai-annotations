@@ -21,7 +21,6 @@ interface LabelAction {
   description: string | undefined;
 }
 
-
 interface LabelPayload {
   pageId: string;
   labels: Label[];
@@ -34,7 +33,7 @@ interface Article {
   labels: Label[];
   highlights: Array<{ id: string; type: string }>;
   existingNote: { id: string; type: string } | undefined;
-};
+}
 
 interface PagePayload {
   id: string;
@@ -91,7 +90,6 @@ interface WebhookLabelPayload {
   pageId: string;
 }
 
-
 // Update the existing WebhookPayload interface
 interface WebhookPayload {
   action: string;
@@ -109,43 +107,63 @@ export default async (req: Request): Promise<Response> => {
     console.log(`[${requestId}] Annotate label: ${annotateLabel}`);
 
     const body: WebhookPayload = (await req.json()) as WebhookPayload;
-    console.log(`[${requestId}] Received webhook payload:`, JSON.stringify(body));
+    console.log(
+      `[${requestId}] Received webhook payload:`,
+      JSON.stringify(body)
+    );
 
     // Update the labels handling
-    const labels = (body.label?.labels || [])
-      .filter((label): label is WebhookLabel => !!label && typeof label === 'object' && 'name' in label)
-    
+    const labels = (body.label?.labels || []).filter(
+      (label): label is WebhookLabel =>
+        !!label && typeof label === "object" && "name" in label
+    );
+
     console.log(`[${requestId}] Filtered labels:`, JSON.stringify(labels));
 
     if (labels.length === 0) {
       console.log(`[${requestId}] No labels found in the webhook payload.`);
-      return new Response(`No labels found in the webhook payload.`, { status: 400 });
+      return new Response(`No labels found in the webhook payload.`, {
+        status: 400,
+      });
     }
-    
-    const matchingLabels = labels
-      .filter(label => 
-        label.name === annotateLabel || 
-        label.name.startsWith(`${annotateLabel}:`)
-      )
-      .map(label => label.name);
 
-    console.log(`[${requestId}] Matching labels:`, JSON.stringify(matchingLabels));
+    const matchingLabels = labels
+      .filter(
+        (label) =>
+          label.name === annotateLabel ||
+          label.name.startsWith(`${annotateLabel}:`)
+      )
+      .map((label) => label.name);
+
+    console.log(
+      `[${requestId}] Matching labels:`,
+      JSON.stringify(matchingLabels)
+    );
 
     if (matchingLabels.length === 0) {
       console.log(`[${requestId}] No '${annotateLabel}' labels found.`);
-      return new Response(`No '${annotateLabel}' labels found. Expected at least one '${annotateLabel}' or '${annotateLabel}:*' label.`, { status: 400 });
+      return new Response(
+        `No '${annotateLabel}' labels found. Expected at least one '${annotateLabel}' or '${annotateLabel}:*' label.`,
+        { status: 400 }
+      );
     }
 
-    console.log(`Found matching labels: ${matchingLabels.join(', ')}`);
+    console.log(`Found matching labels: ${matchingLabels.join(", ")}`);
 
     // You can now use matchingLabels array for further processing
     // For example, to check for specific labels:
     const hasBaseLabel = matchingLabels.includes(annotateLabel);
     const hasTask = matchingLabels.includes(`${annotateLabel}:task`);
-    const hasTranscription = matchingLabels.includes(`${annotateLabel}:transcription`);
-    const hasCompletion = matchingLabels.includes(`${annotateLabel}:completion`);
+    const hasTranscription = matchingLabels.includes(
+      `${annotateLabel}:transcription`
+    );
+    const hasCompletion = matchingLabels.includes(
+      `${annotateLabel}:completion`
+    );
 
-    console.log(`hasBaseLabel: ${hasBaseLabel}, hasTask: ${hasTask}, hasTranscription: ${hasTranscription}, hasCompletion: ${hasCompletion}`);
+    console.log(
+      `hasBaseLabel: ${hasBaseLabel}, hasTask: ${hasTask}, hasTranscription: ${hasTranscription}, hasCompletion: ${hasCompletion}`
+    );
 
     const articleId = body.label?.pageId;
     if (!articleId) {
@@ -169,9 +187,8 @@ export default async (req: Request): Promise<Response> => {
     console.log("Found 'tags' action:", found);
     console.log("Matching LabelAction:", action);
     if (found) {
+      const currentLabelActions = action;
 
-      const currentLabelActions = action
-      
       console.log("TAGS currentLabelActions: ", action);
 
       const articleLabelsPrompt = labelsToPrompt(
@@ -181,25 +198,26 @@ export default async (req: Request): Promise<Response> => {
         true
       );
 
-      const chatgptExample = { 
-        "tags": [
-        {
-          "name": "Tag Name",
-          "description": "Really short tag description or an empty string"
-        },
-        {
-          "name": "Gender and Education",
-          "description": ""
-        },
-        {
-          "name": "Inclusive Knowledge Preservation",
-          "description": "Accessibility and long-term preservation of human knowledge"
-        }
-      ]
-    }
+      const chatgptExample = {
+        tags: [
+          {
+            name: "Tag Name",
+            description: "Really short tag description or an empty string",
+          },
+          {
+            name: "Gender and Education",
+            description: "",
+          },
+          {
+            name: "Inclusive Knowledge Preservation",
+            description:
+              "Accessibility and long-term preservation of human knowledge",
+          },
+        ],
+      };
 
       const allLabels = await getAllLabelsFromOmnivore(omnivoreHeaders);
-      
+
       console.log("allLabels: ", allLabels);
       console.log("article.labels: ", article.labels);
 
@@ -209,9 +227,6 @@ export default async (req: Request): Promise<Response> => {
         "All labels in Omnivore: ",
         true
       );
-
-
-
 
       const doTagsPrompt = `Generate a list of useful tags that could be added to this article. Proved them as a JSON array of objects with name and description properties.
       ONLY respond with the JSON array.
@@ -235,31 +250,35 @@ export default async (req: Request): Promise<Response> => {
       const completionResponse = await openai.chat.completions.create({
         ...JSON.parse(settings),
         messages: [{ role: "user", content: prompt }],
-        response_format: { 
+        response_format: {
           type: "json_schema",
-          schema: {
-            type: "object",
-            properties: {
-              tags: {
-                type: "array",
-                items: {
-                  type: "object",
-                  properties: {
-                    name: {
-                      type: "string"
+          json_schema: {
+            name: "tag_list",
+            strict: true,
+            schema: {
+              type: "object",
+              properties: {
+                tags: {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    properties: {
+                      name: {
+                        type: "string",
+                      },
+                      description: {
+                        type: "string",
+                      },
                     },
-                    description: {
-                      type: "string"
-                    }
+                    required: ["name", "description"],
+                    additionalProperties: false,
                   },
-                  required: ["name", "description"],
-                  additionalProperties: false
-                }
-              }
+                },
+              },
+              required: ["tags"],
             },
-            required: ["tags"]
-          }
-        }
+          },
+        },
       });
 
       // const generatedTags = completionResponse.choices[0].message.content
@@ -272,7 +291,7 @@ export default async (req: Request): Promise<Response> => {
       //   );
 
       const response = completionResponse.choices[0].message.content;
-      
+
       if (!response) {
         console.log(
           "No response from OpenAI.",
@@ -299,18 +318,13 @@ export default async (req: Request): Promise<Response> => {
         currentLabelActions.replacedLabel,
       ];
 
-      await addLabelsToOmnivoreArticle(
-        article.id,
-        newLabels,
-        omnivoreHeaders
-      );
+      await addLabelsToOmnivoreArticle(article.id, newLabels, omnivoreHeaders);
 
       return new Response(
         `New tags added to the article and action updated to did: action.`,
         { status: 200 }
       );
-    } 
-    else if (hasOpenLabelActions(labelActions).hasOpen) {
+    } else if (hasOpenLabelActions(labelActions).hasOpen) {
       const currentLabelAction = hasOpenLabelActions(labelActions).nextAction;
       console.log("Running catchall with: ", currentLabelAction?.action);
       console.log("currentLabelAction: ", currentLabelAction);
@@ -362,27 +376,32 @@ export default async (req: Request): Promise<Response> => {
   }
 };
 
-const resolvedLabelActions = (currentAction: string, myLabelAction: LabelAction[]): { found: boolean; action: LabelAction | null } => {
-  const matchingAction = myLabelAction.find(label => 
-    label.action === currentAction
+const resolvedLabelActions = (
+  currentAction: string,
+  myLabelAction: LabelAction[]
+): { found: boolean; action: LabelAction | null } => {
+  const matchingAction = myLabelAction.find(
+    (label) => label.action === currentAction
   );
-  
+
   return {
     found: !!matchingAction,
-    action: matchingAction || null
+    action: matchingAction || null,
   };
-}
+};
 
-const hasOpenLabelActions = (myLabelAction: LabelAction[])   => {
-  const undoneAction = myLabelAction.find(label => label.done === false);
+const hasOpenLabelActions = (myLabelAction: LabelAction[]) => {
+  const undoneAction = myLabelAction.find((label) => label.done === false);
   return {
-    hasOpen: myLabelAction.some(label => label.done === false),
-    nextAction: undoneAction || null
+    hasOpen: myLabelAction.some((label) => label.done === false),
+    nextAction: undoneAction || null,
   };
-}
+};
 
-async function getArticle(articleId: string, omnivoreHeaders: Record<string, string>): Promise<Article> {
-
+async function getArticle(
+  articleId: string,
+  omnivoreHeaders: Record<string, string>
+): Promise<Article> {
   interface FetchQueryResponse {
     data: {
       article: {
@@ -444,8 +463,7 @@ async function getArticle(articleId: string, omnivoreHeaders: Record<string, str
       redirect: "follow",
     }
   );
-  const omnivoreResponse =
-    (await omnivoreRequest.json()) as FetchQueryResponse;
+  const omnivoreResponse = (await omnivoreRequest.json()) as FetchQueryResponse;
 
   const {
     data: {
@@ -467,7 +485,7 @@ async function getArticle(articleId: string, omnivoreHeaders: Record<string, str
     highlights,
     existingNote: highlights.find(({ type }) => type === "NOTE"),
     content: articleContent,
-  }
+  };
   console.log("Loaded article: ", article);
   return article;
 }
@@ -479,17 +497,27 @@ function arrayToPromptGenerator(array: (string | null)[]): string {
     .join("\n");
 }
 
-function getLabelDescription(labelName: string, labels: Label[]): string | undefined {
-  const label = labels.find(l => l.name === labelName);
+function getLabelDescription(
+  labelName: string,
+  labels: Label[]
+): string | undefined {
+  const label = labels.find((l) => l.name === labelName);
   return label?.description;
 }
 
-function getLabelAction(matchingLabels: string[], article: Article, annotateLabel: string ): LabelAction[] {
-  return matchingLabels.map(label => {
+function getLabelAction(
+  matchingLabels: string[],
+  article: Article,
+  annotateLabel: string
+): LabelAction[] {
+  return matchingLabels.map((label) => {
     const description = getLabelDescription(label, article.labels);
-    const promptWithFallback = description || process.env["OPENAI_PROMPT"] || "Return a tweet-length TL;DR of the following article.";
+    const promptWithFallback =
+      description ||
+      process.env["OPENAI_PROMPT"] ||
+      "Return a tweet-length TL;DR of the following article.";
 
-    const promptBodyArray = (promptWithFallback: string) :string[] => [
+    const promptBodyArray = (promptWithFallback: string): string[] => [
       promptWithFallback,
       `Article title: ${article.title}`,
       `Article content: ${article.content}`,
@@ -502,10 +530,10 @@ function getLabelAction(matchingLabels: string[], article: Article, annotateLabe
       processLabel: label.split(":")[0],
       action: label.split(":")[1],
       description,
-      prompts: promptBodyArray(promptWithFallback)
-    }
+      prompts: promptBodyArray(promptWithFallback),
+    };
   });
-} 
+}
 
 function labelsToPrompt(
   labels: Label[],
@@ -530,11 +558,11 @@ function labelsToPrompt(
   if (returnJson) {
     const json = labelsWithoutAnnotationLabel.map((label) => ({
       name: label.name,
-      description: label.description || ""
+      description: label.description || "",
     }));
     console.log("json: ", json);
     return `${prePrompt} ${JSON.stringify(json, null, 2)}`;
-  } else {  
+  } else {
     const labelString = labelsWithoutAnnotationLabel
       .map((label) => label.name)
       .join(", ");
@@ -594,7 +622,11 @@ async function getAllLabelsFromOmnivore(
   }
 }
 
-async function setLabels(pageId: string, labels: Label[], omnivoreHeaders: Record<string, string>): Promise<void> {
+async function setLabels(
+  pageId: string,
+  labels: Label[],
+  omnivoreHeaders: Record<string, string>
+): Promise<void> {
   const mutation = `mutation SetLabels($input: SetLabelsInput!) {
     setLabels(input: $input) {
       ... on SetLabelsSuccess {
@@ -619,14 +651,14 @@ async function setLabels(pageId: string, labels: Label[], omnivoreHeaders: Recor
   const labelIds = labels.map((it) => it.id);
 
   const response = await fetch("https://api-prod.omnivore.app/api/graphql", {
-    method: 'POST',
+    method: "POST",
     headers: {
       ...omnivoreHeaders,
-      'Content-Type': 'application/json',
+      "Content-Type": "application/json",
     },
     body: JSON.stringify({
       query: mutation,
-      variables: { input: { pageId, labelIds } }
+      variables: { input: { pageId, labelIds } },
     }),
   });
 
