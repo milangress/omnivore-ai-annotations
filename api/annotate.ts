@@ -301,7 +301,8 @@ export default async (req: Request): Promise<Response> => {
         return new Response(`No response from OpenAI.`, { status: 500 });
       }
 
-      const jsonResponse = JSON.parse(response);
+      const generatedTags = JSON.parse(response);
+      console.log('generatedTags', generatedTags)
 
       if (!generatedTags || generatedTags.length === 0) {
         console.log(
@@ -311,12 +312,11 @@ export default async (req: Request): Promise<Response> => {
         return new Response(`No new tags generated.`, { status: 200 });
       }
 
-      console.log(`Generated tags: ${generatedTags.join(", ")}`);
 
       const newLabels = [
-        ...article.labels.map((label) => label.name),
-        ...generatedTags,
-        currentLabelActions.replacedLabel,
+        ...article.labels,
+        ...generatedTags.tags,
+        {name: currentLabelActions.replacedLabel},
       ];
 
       await addLabelsToOmnivoreArticle(article.id, newLabels, omnivoreHeaders);
@@ -628,6 +628,7 @@ async function setLabels(
   labels: Label[],
   omnivoreHeaders: Record<string, string>
 ): Promise<void> {
+  console.log("Setting labels:", labels);
   const mutation = `mutation SetLabels($input: SetLabelsInput!) {
     setLabels(input: $input) {
       ... on SetLabelsSuccess {
@@ -878,6 +879,9 @@ async function addLabelsToOmnivoreArticle(
   labels: string[],
   omnivoreHeaders: Record<string, string>
 ) {
+
+  console.log('addLabelsToOmnivoreArticle', labels)
+
   // STEP 3: Add new tags to the article
   const addLabelsMutation = {
     query: `mutation SetLabels($input: SetLabelsInput!) {
