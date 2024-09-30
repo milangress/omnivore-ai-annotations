@@ -1,3 +1,4 @@
 .vercel
 schema.graphql
 .env*.local
+node_modules
