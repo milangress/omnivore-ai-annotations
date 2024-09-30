@@ -179,7 +179,7 @@ export default async (req: Request): Promise<Response> => {
 
     const labelActions = getLabelAction(matchingLabels, article, annotateLabel);
 
-    const model = process.env["OPENAI_MODEL"] || "gpt-4-turbo-preview";
+    const model = process.env["OPENAI_MODEL"] || "gpt-4o-2024-08-06";
     const settings = process.env["OPENAI_SETTINGS"] || `{"model":"${model}"}`;
 
     console.log("labelAction: ", labelActions);
