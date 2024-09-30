@@ -276,6 +276,7 @@ export default async (req: Request): Promise<Response> => {
                 },
               },
               required: ["tags"],
+              "additionalProperties": false
             },
           },
         },
