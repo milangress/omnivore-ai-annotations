@@ -199,7 +199,7 @@ export default async (req: Request): Promise<Response> => {
     console.log("PRE currentLabelActions: ", currentLabelActions);
     console.log("if: ", currentLabelActions, currentLabelActions.action === "tags", currentLabelActions && currentLabelActions.action === "tags");
     // Handle different 'do:' actions 
-    if (currentLabelActions && currentLabelActions.action === "tags") {
+    if (true) {
       
       console.log("TAGS currentLabelActions: ", currentLabelActions);
 
