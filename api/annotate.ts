@@ -793,6 +793,10 @@ async function addLabelsToOmnivoreArticle(
   // First, ensure all labels exist
   for (const label of labels) {
     if (!label.id) {
+      if (!label.name) {
+        console.error("Label is missing a name:", label);
+        continue;
+      }
       // If the label doesn't have an ID, it's a new label that needs to be created
       const result = await createLabel(label.name, label.color, label.description, omnivoreHeaders);
       if (!result.success) {
@@ -800,9 +804,12 @@ async function addLabelsToOmnivoreArticle(
         // You might want to handle this error, e.g., by skipping this label or returning an error
       } else if (result.label) {
         label.id = result.label.id; // Update the label with the newly created ID
+        label.color = result.label.color;
       }
     }
   }
+
+  console.log('all Labels should exist', labels);
 
   // Now proceed with setting the labels on the article
   const setLabelsMutation = {
@@ -852,7 +859,7 @@ async function addLabelsToOmnivoreArticle(
     } else if (setLabelsResponse.data?.setLabels?.errorCodes) {
       console.error(
         `Failed to set labels on article "${articleId}":`,
-        setLabelsResponse.data.setLabels.errorCodes
+        setLabelsResponse.data.setLabels.errorCodes, setLabelsMutation
       );
       return new Response(
         `Failed to set labels: ${setLabelsResponse.data.setLabels.errorCodes.join(", ")}`,
