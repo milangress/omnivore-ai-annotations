@@ -500,23 +500,24 @@ async function getAllLabelsFromOmnivore(
   omnivoreHeaders: Record<string, string>
 ): Promise<Label[]> {
   const labelsQuery = {
-    query: `
-      query {
-        labels {
-          ... on LabelsSuccess {
-            labels {
-              id
-              name
-              color
-              description
-              createdAt
+    query: `query GetLabels{
+          labels {
+            ... on LabelsSuccess {
+              labels {
+                id, 
+                name, 
+                color,
+                description,
+                createdAt, 
+                position, 
+                internal
+              }
+            }
+            ... on LabelsError {
+              errorCodes
             }
           }
-          ... on LabelsError {
-            errorCodes
-          }
         }
-      }
     `,
   };
 
@@ -530,8 +531,10 @@ async function getAllLabelsFromOmnivore(
     const data = await response.json();
 
     if (data.data && data.data.labels && data.data.labels.labels) {
+      console.log("data.data.labels.labels: ", data.data.labels.labels);
       return data.data.labels.labels;
     } else if (data.data && data.data.labels && data.data.labels.errorCodes) {
+      console.log("data.data.labels.errorCodes: ", data.data.labels.errorCodes);
       throw new Error(
         `Failed to fetch labels: ${data.data.labels.errorCodes.join(", ")}`
       );
@@ -542,6 +545,51 @@ async function getAllLabelsFromOmnivore(
     console.error("Error fetching labels:", error);
     throw error;
   }
+}
+
+async function setLabels(pageId: string, labels: Label[], omnivoreHeaders: Record<string, string>): Promise<void> {
+  const mutation = `mutation SetLabels($input: SetLabelsInput!) {
+    setLabels(input: $input) {
+      ... on SetLabelsSuccess {
+        labels {
+          ...LabelFields
+        }
+      }
+      ... on SetLabelsError {
+        errorCodes
+      }
+    }
+  }
+  
+  fragment LabelFields on Label {
+    id
+    name
+    color
+    description
+    createdAt
+  }`;
+
+  const labelIds = labels.map((it) => it.id);
+
+  const response = await fetch("https://api-prod.omnivore.app/api/graphql", {
+    method: 'POST',
+    headers: {
+      ...omnivoreHeaders,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      query: mutation,
+      variables: { input: { pageId, labelIds } }
+    }),
+  });
+
+  const result = await response.json();
+
+  if (result.errors) {
+    throw new Error(`Failed to set labels: ${result.errors[0].message}`);
+  }
+
+  console.log("Labels set successfully:", result.data.setLabels);
 }
 
 let baseFragment = `
