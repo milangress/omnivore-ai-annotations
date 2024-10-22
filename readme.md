@@ -1,5 +1,10 @@
 # Let ChatGPT annotate Omnivore articles for you
 
+## this Fork
+
+This is is a fork of: https://github.com/jancbeck/omnivore-ai-annotations
+Aiming to introducce a ai auto-tagging feature
+
 ## Overview
 
 This serverless function can be used to automatically add annotations to Omnivore articles when a specific label (say, "summarize") is added to them. It uses Omnivore's [API](https://docs.omnivore.app/integrations/api.html) and [webhooks](https://docs.omnivore.app/integrations/webhooks.html) as well as [OpenAI's chat completions API](https://platform.openai.com/docs/guides/text-generation).
